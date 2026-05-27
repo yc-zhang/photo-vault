@@ -17,13 +17,9 @@ with open(_cred_path) as f:
 
 from qcloud_cos import CosConfig, CosS3Client
 
-_DEFAULT_REGION = "ap-shanghai"
-_DEFAULT_BUCKET = "my-pic-storage-1319010017"
 
-
-def _client(region=None):
-    r = region or _DEFAULT_REGION
-    config = CosConfig(Region=r, SecretId=_creds["secretId"], SecretKey=_creds["secretKey"])
+def _client(region):
+    config = CosConfig(Region=region, SecretId=_creds["secretId"], SecretKey=_creds["secretKey"])
     return CosS3Client(config)
 
 
@@ -131,9 +127,7 @@ def cmd_diff(bucket, local_dir, prefix, region):
     total_bytes = sum(os.path.getsize(i["LocalPath"]) for i in to_upload)
     total_mb = round(total_bytes / 1024 / 1024, 1)
     put_count = len(to_upload)
-    # COS PUT request: ~¥0.01 / 10k requests
     request_fee = round(put_count * 0.01 / 10000, 6)
-    # Standard storage: ¥0.099 / GB / month
     storage_fee_per_month = round(total_bytes / 1024 / 1024 / 1024 * 0.099, 4)
 
     result = {
@@ -162,7 +156,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="photo-vault — backup photos to cloud")
-    parser.add_argument("--region", default=_DEFAULT_REGION, help=f"COS region (default: {_DEFAULT_REGION})")
+    parser.add_argument("--region", required=True, help="COS region, e.g. ap-guangzhou")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -171,29 +165,29 @@ def main():
 
     # list-objects
     p = sub.add_parser("list-objects", help="List objects in a bucket")
-    p.add_argument("--bucket", default=_DEFAULT_BUCKET)
+    p.add_argument("--bucket", required=True)
     p.add_argument("--prefix", default="")
 
     # upload
     p = sub.add_parser("upload", help="Upload a local file")
-    p.add_argument("--bucket", default=_DEFAULT_BUCKET)
+    p.add_argument("--bucket", required=True)
     p.add_argument("local_path")
     p.add_argument("object_key")
 
     # download
     p = sub.add_parser("download", help="Download a COS object")
-    p.add_argument("--bucket", default=_DEFAULT_BUCKET)
+    p.add_argument("--bucket", required=True)
     p.add_argument("object_key")
     p.add_argument("local_path")
 
     # head
     p = sub.add_parser("head", help="Get object metadata")
-    p.add_argument("--bucket", default=_DEFAULT_BUCKET)
+    p.add_argument("--bucket", required=True)
     p.add_argument("object_key")
 
     # diff
     p = sub.add_parser("diff", help="Compare local dir with bucket")
-    p.add_argument("--bucket", default=_DEFAULT_BUCKET)
+    p.add_argument("--bucket", required=True)
     p.add_argument("--prefix", default="")
     p.add_argument("local_dir")
 

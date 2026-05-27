@@ -1,11 +1,6 @@
 ---
 name: photo-vault
 description: "Upload photos from a local folder to cloud storage. Currently supports Tencent Cloud COS; more storage backends coming soon. Built-in diff: scan local dir vs bucket, upload new/changed files by size."
-metadata:
-  openclaw:
-    requires:
-      env:
-        - PHOTO_VAULT_BUCKET
 ---
 
 # Photo Vault
@@ -23,12 +18,14 @@ metadata:
 python3 skills/photo-vault/scripts/vault.py <command> [options]
 ```
 
+All commands require `--region`. Commands that operate on a bucket require `--bucket`.
+
 ## Commands
 
 | Command | What it does |
 |---------|-------------|
 | `list-buckets` | List all COS buckets |
-| `list-objects --prefix x` | List objects, optional prefix, auto pagination |
+| `list-objects` | List objects in a bucket, optional prefix, auto pagination |
 | `upload <local_path> <object_key>` | Upload a single file |
 | `download <object_key> <local_path>` | Download a single object |
 | `head <object_key>` | Object metadata (size, ETag, last-modified) |
@@ -42,7 +39,11 @@ python3 skills/photo-vault/scripts/vault.py <command> [options]
 
 2. Claw 运行 diff：
    ```bash
-   python3 scripts/vault.py diff --prefix photo_output/260601\ Hokkaido\ Trip ~/Desktop/photo_output/260601\ Hokkaido\ Trip/
+   python3 scripts/vault.py diff \
+     --region ap-guangzhou \
+     --bucket my-bucket-123456 \
+     --prefix photo_output/260601\ Hokkaido\ Trip \
+     ~/Desktop/photo_output/260601\ Hokkaido\ Trip/
    ```
 
 3. Claw 汇报摘要：
@@ -70,19 +71,27 @@ At personal photo scale (~20K objects, a few GB), the monthly cost is **well und
 ## Examples
 
 ```bash
-# List all objects under photo_output/
-python3 scripts/vault.py list-objects --prefix photo_output/
+# List all buckets
+python3 scripts/vault.py list-buckets --region ap-guangzhou
 
-# Check what needs uploading from the Kyushu Trip folder
-python3 scripts/vault.py diff --prefix photo_output/260501\ Kyushu\ Trip ~/Desktop/photo_output/260501\ Kyushu\ Trip/
+# List objects under a prefix
+python3 scripts/vault.py list-objects --region ap-shanghai --bucket my-bucket-123456 --prefix photo_output/
+
+# Check what needs uploading from a folder
+python3 scripts/vault.py diff \
+  --region ap-shanghai \
+  --bucket my-bucket-123456 \
+  --prefix photo_output/260501\ Kyushu\ Trip \
+  ~/Desktop/photo_output/260501\ Kyushu\ Trip/
 
 # Upload a single file
-python3 scripts/vault.py upload --bucket my-pic-storage-1319010017 ~/photo.jpg vacation/photo.jpg
+python3 scripts/vault.py upload \
+  --region ap-shanghai \
+  --bucket my-bucket-123456 \
+  ~/photo.jpg vacation/photo.jpg
 ```
 
 ## Notes
 
-- `--bucket` defaults to `my-pic-storage-1319010017`
-- `--region` defaults to `ap-shanghai`
 - Diff compares by **file size** (fast, sufficient for photos)
 - 20K objects → ~20 list requests → ~5 seconds
