@@ -127,6 +127,15 @@ def cmd_diff(bucket, local_dir, prefix, region):
 
     missing_locally = [k for k in remote if k not in local_files]
 
+    # cost estimate
+    total_bytes = sum(os.path.getsize(i["LocalPath"]) for i in to_upload)
+    total_mb = round(total_bytes / 1024 / 1024, 1)
+    put_count = len(to_upload)
+    # COS PUT request: ~¥0.01 / 10k requests
+    request_fee = round(put_count * 0.01 / 10000, 6)
+    # Standard storage: ¥0.099 / GB / month
+    storage_fee_per_month = round(total_bytes / 1024 / 1024 / 1024 * 0.099, 4)
+
     result = {
         "LocalDir": local_dir,
         "Bucket": bucket,
@@ -136,6 +145,13 @@ def cmd_diff(bucket, local_dir, prefix, region):
         "ToUpload": to_upload,
         "AlreadySynced": already_synced,
         "MissingLocally": missing_locally,
+        "CostEstimate": {
+            "FilesToUpload": put_count,
+            "TotalDataMB": total_mb,
+            "PutRequests": put_count,
+            "PutRequestFeeCNY": request_fee,
+            "MonthlyStorageFeeCNY": storage_fee_per_month
+        }
     }
     _pp(result)
 

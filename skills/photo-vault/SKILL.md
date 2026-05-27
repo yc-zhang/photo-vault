@@ -5,21 +5,19 @@ metadata:
   openclaw:
     requires:
       env:
-        - PHOTO_VAULT_BUCKET  # optional, defaults to my-pic-storage-1319010017
+        - PHOTO_VAULT_BUCKET
 ---
 
 # Photo Vault
 
-照片备份到腾讯云 COS。核心流程：diff → upload。
+照片备份到腾讯云 COS。
 
 ## Prerequisites
 
-- `tccli` credentials configured at `~/.tccli/default.credential`
-- `cos-python-sdk-v5` installed (via `pip3 install coscmd` which brings it)
+- `tccli` credentials at `~/.tccli/default.credential`
+- COS Python SDK: `pip3 install coscmd` (brings `cos-python-sdk-v5`)
 
 ## Script
-
-`scripts/vault.py` — all operations go through this CLI.
 
 ```bash
 python3 skills/photo-vault/scripts/vault.py <command> [options]
@@ -29,33 +27,62 @@ python3 skills/photo-vault/scripts/vault.py <command> [options]
 
 | Command | What it does |
 |---------|-------------|
-| `list-buckets` | List all COS buckets under the account |
-| `list-objects --prefix x` | List objects, optional prefix filter. Handles pagination automatically |
+| `list-buckets` | List all COS buckets |
+| `list-objects --prefix x` | List objects, optional prefix, auto pagination |
 | `upload <local_path> <object_key>` | Upload a single file |
 | `download <object_key> <local_path>` | Download a single object |
-| `head <object_key>` | Get object metadata (size, ETag, last-modified) |
-| `diff <local_dir>` | **Core operation.** Compare local dir vs bucket. Returns: what's new, what changed, what's already synced, what's missing locally |
+| `head <object_key>` | Object metadata (size, ETag, last-modified) |
+| `diff <local_dir>` | **Core.** Compare local dir vs bucket. Returns: new/changed/synced/missing + cost estimate |
 
-## Workflows
+## Workflow
 
-### Full sync a local photo dir
+### The One Flow — diff → confirm → upload
+
+1. 你处理完照片放入一个文件夹（如 `photo_output/260601 Hokkaido Trip/`）
+
+2. Claw 运行 diff：
+   ```bash
+   python3 scripts/vault.py diff --prefix photo_output/260601\ Hokkaido\ Trip ~/Desktop/photo_output/260601\ Hokkaido\ Trip/
+   ```
+
+3. Claw 汇报摘要：
+   - 新增 **N** 张待上传
+   - 数据量 **X MB**
+   - PUT 请求 **N** 次（每次 1 个对象）
+   - 请求费用 ¥**0.0000X**（≈免费）
+   - 月存储费用 ¥**X**（Standard 存储 ¥0.099/GB/月）
+   - **询问用户：是否开始上传？**
+
+4. 你确认后，Claw 逐张上传
+
+5. 上传完毕，汇报结果
+
+## Cost Reference (Tencent Cloud COS Standard Storage)
+
+| Item | Price (Chinese Mainland) |
+|------|--------------------------|
+| PUT/COPY/POST/LIST requests | ¥0.01 / 10,000 requests |
+| Storage | ¥0.099 / GB / month |
+| GET/HEAD requests | ¥0.01 / 10,000 requests |
+
+At personal photo scale (~20K objects, a few GB), the monthly cost is **well under ¥1**.
+
+## Examples
 
 ```bash
-# 1. See what's different
+# List all objects under photo_output/
+python3 scripts/vault.py list-objects --prefix photo_output/
+
+# Check what needs uploading from the Kyushu Trip folder
 python3 scripts/vault.py diff --prefix photo_output/260501\ Kyushu\ Trip ~/Desktop/photo_output/260501\ Kyushu\ Trip/
 
-# 2. Upload new ones (parse diff output, upload each ToUpload entry)
-```
-
-### Quick check what's in the vault
-
-```bash
-python3 scripts/vault.py list-objects --prefix photo_output/
+# Upload a single file
+python3 scripts/vault.py upload --bucket my-pic-storage-1319010017 ~/photo.jpg vacation/photo.jpg
 ```
 
 ## Notes
 
-- `--bucket` defaults to `my-pic-storage-1319010017`, override with `--bucket <name>`
+- `--bucket` defaults to `my-pic-storage-1319010017`
 - `--region` defaults to `ap-shanghai`
-- Diff compares by **file size** (fast, good enough for photos). Full ETag/MD5 check is opt-in if needed.
-- 20K objects → 20 list requests → ~5 seconds. No cache/db needed at this scale.
+- Diff compares by **file size** (fast, sufficient for photos)
+- 20K objects → ~20 list requests → ~5 seconds
