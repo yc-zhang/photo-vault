@@ -18,45 +18,60 @@ description: "Upload photos from a local folder to cloud storage. Currently supp
 python3 skills/photo-vault/scripts/vault.py <command> [options]
 ```
 
-All commands require `--region`. Commands that operate on a bucket require `--bucket`.
+## Config (set once)
+
+Sets of the shared config (`~/.photo-vault/config.json`), then forget about it.
+
+```bash
+# Set it up once
+vault.py config set region       ap-shanghai
+vault.py config set bucket       my-pic-storage-1319010017
+vault.py config set local_root   ~/Desktop/photo_output
+vault.py config set cloud_prefix photo_output
+
+# Check current config
+vault.py config get
+```
+
+After config is set, most commands accept a **subfolder** name only.
 
 ## Commands
 
 | Command | What it does |
 |---------|-------------|
+| `config get [key]` | Show config (all or one key) |
+| `config set <key> <value>` | Set a config value |
 | `list-buckets` | List all COS buckets |
-| `list-objects` | List objects in a bucket, optional prefix, auto pagination |
+| `list-objects [subfolder]` | List objects, resolved from config + subfolder |
+| `diff [subfolder]` | **Core.** Compare local dir vs bucket, show cost estimate |
+| `sync [subfolder]` | Diff + ask + upload in one go |
 | `upload <local_path> <object_key>` | Upload a single file |
 | `download <object_key> <local_path>` | Download a single object |
-| `head <object_key>` | Object metadata (size, ETag, last-modified) |
-| `diff <local_dir>` | **Core.** Compare local dir vs bucket. Returns: new/changed/synced/missing + cost estimate |
+| `head <object_key>` | Object metadata |
+
+`--region` and `--bucket` can still be passed to override config values.
 
 ## Workflow
 
-### The One Flow — diff → confirm → upload
+### The One Flow — config → diff → confirm → upload
 
-1. 你处理完照片放入一个文件夹（如 `photo_output/260601 Hokkaido Trip/`）
-
-2. Claw 运行 diff：
-   ```bash
-   python3 scripts/vault.py diff \
-     --region ap-guangzhou \
-     --bucket my-bucket-123456 \
-     --prefix photo_output/260601\ Hokkaido\ Trip \
-     ~/Desktop/photo_output/260601\ Hokkaido\ Trip/
+1. **配置一次**
+   ```
+   vault.py config set region ap-shanghai
+   vault.py config set bucket my-bucket-123456
+   vault.py config set local_root ~/Desktop/photo_output
+   vault.py config set cloud_prefix photo_output
    ```
 
-3. Claw 汇报摘要：
-   - 新增 **N** 张待上传
-   - 数据量 **X MB**
-   - PUT 请求 **N** 次（每次 1 个对象）
-   - 请求费用 ¥**0.0000X**（≈免费）
-   - 月存储费用 ¥**X**（Standard 存储 ¥0.099/GB/月）
-   - **询问用户：是否开始上传？**
+2. **平时只用说「传 Kyushu Trip」**
+   → Claw 自动组装：
+   - 本地 → `~/Desktop/photo_output/260501 Kyushu Trip/`
+   - 云端 → `photo_output/260501 Kyushu Trip/`
+   - region + bucket → 从配置读
 
-4. 你确认后，Claw 逐张上传
+3. Claw 跑 diff 汇报摘要 + 费用 → 问你是否确认
 
-5. 上传完毕，汇报结果
+4. 你确认后上传
 
 ## Cost Reference (Tencent Cloud COS Standard Storage)
 
@@ -72,23 +87,16 @@ At personal photo scale (~20K objects, a few GB), the monthly cost is **well und
 
 ```bash
 # List all buckets
-python3 scripts/vault.py list-buckets --region ap-guangzhou
+vault.py list-buckets --region ap-guangzhou
 
-# List objects under a prefix
-python3 scripts/vault.py list-objects --region ap-shanghai --bucket my-bucket-123456 --prefix photo_output/
+# List objects under photo_output/
+vault.py list-objects
 
-# Check what needs uploading from a folder
-python3 scripts/vault.py diff \
-  --region ap-shanghai \
-  --bucket my-bucket-123456 \
-  --prefix photo_output/260501\ Kyushu\ Trip \
-  ~/Desktop/photo_output/260501\ Kyushu\ Trip/
+# Check what needs uploading from Kyushu Trip
+vault.py diff "260501 Kyushu Trip"
 
-# Upload a single file
-python3 scripts/vault.py upload \
-  --region ap-shanghai \
-  --bucket my-bucket-123456 \
-  ~/photo.jpg vacation/photo.jpg
+# Upload a specific file
+vault.py upload ~/photo.jpg vacation/photo.jpg --bucket another-bucket
 ```
 
 ## Notes

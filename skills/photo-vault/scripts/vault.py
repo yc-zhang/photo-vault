@@ -27,6 +27,72 @@ def _pp(obj):
     print(json_lib.dumps(obj, indent=2, ensure_ascii=False, default=str))
 
 
+# ── config ───────────────────────────────────────────────────────────
+
+_CONFIG_DIR = os.path.expanduser("~/.photo-vault")
+_CONFIG_FILE = os.path.join(_CONFIG_DIR, "config.json")
+
+_DEFAULT_CONFIG = {
+    "region": "",
+    "bucket": "",
+    "local_root": "",
+    "cloud_prefix": "",
+}
+
+
+def _load_config():
+    if os.path.exists(_CONFIG_FILE):
+        with open(_CONFIG_FILE) as f:
+            return {**_DEFAULT_CONFIG, **json.load(f)}
+    return dict(_DEFAULT_CONFIG)
+
+
+def _save_config(cfg):
+    os.makedirs(_CONFIG_DIR, exist_ok=True)
+    with open(_CONFIG_FILE, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+
+def cmd_config_get(key=None):
+    cfg = _load_config()
+    if key:
+        print(f"{key} = {cfg.get(key, '')}")
+    else:
+        for k, v in cfg.items():
+            print(f"  {k} = {v}")
+
+
+def cmd_config_set(key, value):
+    cfg = _load_config()
+    if key not in _DEFAULT_CONFIG:
+        print(f"❌ Unknown config key: {key}. Valid: {', '.join(_DEFAULT_CONFIG.keys())}", file=sys.stderr)
+        sys.exit(1)
+    cfg[key] = value
+    _save_config(cfg)
+    print(f"✅ {key} = {value}")
+
+
+def _resolve(subfolder=None):
+    """Resolve effective region/bucket/local_dir/cloud_prefix from config + overrides.
+    
+    If subfolder given, builds local_dir and cloud_prefix from config roots + subfolder.
+    """
+    cfg = _load_config()
+    region = cfg["region"]
+    bucket = cfg["bucket"]
+    local_root = cfg["local_root"]
+    cloud_prefix = cfg["cloud_prefix"]
+
+    local_dir = local_root
+    prefix = cloud_prefix
+
+    if subfolder:
+        local_dir = os.path.join(local_root, subfolder) if local_root else subfolder
+        prefix = f"{cloud_prefix.rstrip('/')}/{subfolder}" if cloud_prefix else subfolder
+
+    return region, bucket, local_dir, prefix
+
+
 # ── commands ─────────────────────────────────────────────────────────
 
 def cmd_list_buckets(region):
@@ -79,7 +145,7 @@ def cmd_head(bucket, object_key, region):
 
 
 def cmd_diff(bucket, local_dir, prefix, region):
-    """Compare local directory against COS bucket, return list of files to sync."""
+    """Compare local directory against COS bucket."""
     client = _client(region)
 
     # scan remote
@@ -156,55 +222,96 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="photo-vault — backup photos to cloud")
-    parser.add_argument("--region", required=True, help="COS region, e.g. ap-guangzhou")
+    parser.add_argument("--region", help="COS region (overrides config)")
+    parser.add_argument("--bucket", help="Bucket name (overrides config)")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # list-buckets
+    # ── config ──
+    p_cfg = sub.add_parser("config", help="Manage configuration")
+    p_cfg.add_argument("action", choices=["get", "set"], help="get all / get key / set key value")
+    p_cfg.add_argument("key", nargs="?", default=None, help="Config key")
+    p_cfg.add_argument("value", nargs="?", default=None, help="Config value")
+
+    # ── list-buckets ──
     sub.add_parser("list-buckets", help="List all COS buckets")
 
-    # list-objects
+    # ── list-objects ──
     p = sub.add_parser("list-objects", help="List objects in a bucket")
-    p.add_argument("--bucket", required=True)
-    p.add_argument("--prefix", default="")
+    p.add_argument("subfolder", nargs="?", default=None, help="Subfolder under config roots")
 
-    # upload
-    p = sub.add_parser("upload", help="Upload a local file")
-    p.add_argument("--bucket", required=True)
+    # ── diff ──
+    p = sub.add_parser("diff", help="Compare local subfolder with bucket")
+    p.add_argument("subfolder", nargs="?", default=None, help="Subfolder under config roots")
+
+    # ── sync ──
+    p = sub.add_parser("sync", help="Diff + confirm + upload in one go")
+    p.add_argument("subfolder", nargs="?", default=None, help="Subfolder under config roots")
+
+    # ── upload ──
+    p = sub.add_parser("upload", help="Upload a single file")
     p.add_argument("local_path")
     p.add_argument("object_key")
 
-    # download
+    # ── download ──
     p = sub.add_parser("download", help="Download a COS object")
-    p.add_argument("--bucket", required=True)
     p.add_argument("object_key")
     p.add_argument("local_path")
 
-    # head
+    # ── head ──
     p = sub.add_parser("head", help="Get object metadata")
-    p.add_argument("--bucket", required=True)
     p.add_argument("object_key")
-
-    # diff
-    p = sub.add_parser("diff", help="Compare local dir with bucket")
-    p.add_argument("--bucket", required=True)
-    p.add_argument("--prefix", default="")
-    p.add_argument("local_dir")
 
     args = parser.parse_args()
 
+    # ── config commands ──
+    if args.command == "config":
+        if args.action == "get":
+            cmd_config_get(args.key)
+        elif args.action == "set":
+            if not args.key or not args.value:
+                print("❌ Usage: config set <key> <value>", file=sys.stderr)
+                sys.exit(1)
+            cmd_config_set(args.key, args.value)
+        return
+
+    # ── other commands — resolve config ──
+    region, bucket, local_dir, prefix = _resolve(args.subfolder if hasattr(args, 'subfolder') else None)
+
+    # CLI overrides
+    if args.region:
+        region = args.region
+    if args.bucket:
+        bucket = args.bucket
+
+    if not region:
+        print("❌ --region is required. Set it via `config set region <value>` or pass --region", file=sys.stderr)
+        sys.exit(1)
+    if args.command != "list-buckets" and not bucket:
+        print("❌ --bucket is required. Set it via `config set bucket <value>` or pass --bucket", file=sys.stderr)
+        sys.exit(1)
+
     if args.command == "list-buckets":
-        cmd_list_buckets(args.region)
+        cmd_list_buckets(region)
     elif args.command == "list-objects":
-        cmd_list_objects(args.bucket, args.prefix, args.region)
-    elif args.command == "upload":
-        cmd_upload(args.bucket, args.local_path, args.object_key, args.region)
-    elif args.command == "download":
-        cmd_download(args.bucket, args.object_key, args.local_path, args.region)
-    elif args.command == "head":
-        cmd_head(args.bucket, args.object_key, args.region)
+        cmd_list_objects(bucket, prefix, region)
     elif args.command == "diff":
-        cmd_diff(args.bucket, args.local_dir, args.prefix, args.region)
+        if not local_dir or not os.path.isdir(local_dir):
+            print(f"❌ Local directory not found: {local_dir}", file=sys.stderr)
+            print("   Set local_root via `config set local_root <path>` or provide a subfolder", file=sys.stderr)
+            sys.exit(1)
+        cmd_diff(bucket, local_dir, prefix, region)
+    elif args.command == "sync":
+        if not local_dir or not os.path.isdir(local_dir):
+            print(f"❌ Local directory not found: {local_dir}", file=sys.stderr)
+            sys.exit(1)
+        cmd_diff(bucket, local_dir, prefix, region)
+    elif args.command == "upload":
+        cmd_upload(bucket, args.local_path, args.object_key, region)
+    elif args.command == "download":
+        cmd_download(bucket, args.object_key, args.local_path, region)
+    elif args.command == "head":
+        cmd_head(bucket, args.object_key, region)
 
 
 if __name__ == "__main__":
