@@ -144,6 +144,80 @@ def cmd_head(bucket, object_key, region):
     _pp(resp)
 
 
+def cmd_sync(bucket, local_dir, prefix, region):
+    """Diff then upload all new/changed files."""
+    import sys as _sys
+    _sys.stdout.reconfigure(line_buffering=True)  # force flush on newline
+
+    client = _client(region)
+
+    # scan remote
+    print("🔍 Scanning remote...", flush=True)
+    marker = None
+    remote = {}
+    while True:
+        kwargs = {"Bucket": bucket, "MaxKeys": 1000}
+        if marker:
+            kwargs["Marker"] = marker
+        if prefix:
+            kwargs["Prefix"] = prefix
+        resp = client.list_objects(**kwargs)
+        for obj in resp.get("Contents", []):
+            key = obj["Key"]
+            remote[key] = {"Size": int(obj["Size"]), "ETag": obj["ETag"]}
+        if resp.get("IsTruncated") == "true" and resp.get("NextMarker"):
+            marker = resp["NextMarker"]
+        else:
+            break
+    print(f"  Remote: {len(remote)} objects", flush=True)
+
+    # scan local
+    print("🔍 Scanning local...", flush=True)
+    local_root = Path(local_dir).resolve()
+    to_upload = []
+    for fpath in local_root.rglob("*"):
+        if fpath.is_file():
+            rel = str(fpath.relative_to(local_root))
+            key = f"{prefix.rstrip('/')}/{rel}" if prefix else rel
+            st = fpath.stat()
+            if key not in remote or remote[key]["Size"] != st.st_size:
+                to_upload.append({"Key": key, "LocalPath": str(fpath), "Size": st.st_size})
+
+    total = len(to_upload)
+    total_bytes = sum(i["Size"] for i in to_upload)
+    total_mb = round(total_bytes / 1024 / 1024, 1)
+    print(f"  Local: {total} files to upload ({total_mb} MB)", flush=True)
+    print()
+    print(f"🚀 Starting upload of {total} files...", flush=True)
+    print()
+
+    ok = 0
+    fail = 0
+    last_report = 0
+    for i, item in enumerate(to_upload, 1):
+        try:
+            client.upload_file(
+                Bucket=bucket,
+                Key=item["Key"],
+                LocalFilePath=item["LocalPath"],
+                EnableMD5=True
+            )
+            ok += 1
+        except Exception as e:
+            fail += 1
+            print(f"  ❌ {item['Key']}: {e}", flush=True)
+        
+        # progress report every 50 or final
+        if ok - last_report >= 50 or i == total:
+            print(f"  [{i}/{total}] ✅ {ok} uploaded, ❌ {fail} failed ({round(i/total*100)}%)", flush=True)
+            last_report = ok
+
+    print()
+    print(f"🏁 Done! {ok} uploaded, {fail} failed", flush=True)
+    if fail > 0:
+        print(f"   Rerun sync to retry failed files", flush=True)
+
+
 def cmd_diff(bucket, local_dir, prefix, region):
     """Compare local directory against COS bucket."""
     client = _client(region)
@@ -305,7 +379,7 @@ def main():
         if not local_dir or not os.path.isdir(local_dir):
             print(f"❌ Local directory not found: {local_dir}", file=sys.stderr)
             sys.exit(1)
-        cmd_diff(bucket, local_dir, prefix, region)
+        cmd_sync(bucket, local_dir, prefix, region)
     elif args.command == "upload":
         cmd_upload(bucket, args.local_path, args.object_key, region)
     elif args.command == "download":

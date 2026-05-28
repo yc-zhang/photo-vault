@@ -1,0 +1,22 @@
+# Workspace config (not part of the skill)
+AGENTS.md
+SOUL.md
+IDENTITY.md
+USER.md
+TOOLS.md
+HEARTBEAT.md
+
+# OpenClaw internal
+.openclaw/
+.clawhub/
+memory/
+avatars/
+
+# Other skills (separate repos)
+skills/feishu/
+skills/gmail/
+skills/microsoft-teams/
+skills/roll-dice/
+
+# macOS
+.DS_Store
